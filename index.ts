@@ -1,5 +1,5 @@
 import "dotenv/config"
-import { getAccountNonce, createSmartAccountClient, ENTRYPOINT_ADDRESS_V07, bundlerActions, getSenderAddress } from "permissionless"
+import { getAccountNonce, createSmartAccountClient, ENTRYPOINT_ADDRESS_V07, bundlerActions, getSenderAddress, signUserOperationHashWithECDSA } from "permissionless"
 import { Address, createClient, createPublicClient, encodeFunctionData, http } from "viem"
 //import { generatePrivateKey, privateKeyToAccount, signMessage } from "viem/accounts"
 import { sepolia } from "viem/chains"
@@ -63,7 +63,7 @@ async function gaslessTransactionsTest() {
     console.log(smartAccountClient.account.address);
 }
 
-async function factoryDataTest() {
+async function sendUserOperationsTest() {
     const bundlerClient = createClient({
         transport: http(paymasterUrl),
         chain: sepolia,
@@ -79,9 +79,10 @@ async function factoryDataTest() {
 
     const SIMPLE_ACCOUNT_FACTORY_ADDRESS = "0x91E60e0613810449d098b0b5Ec8b51A0FE8c8985";
 
-    const owner = privateKeyToAccount(privateKey);
+    const ownerPrivateKey = generatePrivateKey();
+    const owner = privateKeyToAccount(ownerPrivateKey);
 
-    console.log("Generated wallet with private key:", privateKey);
+    console.log("Generated wallet with private key:", ownerPrivateKey);
 
     const factory = SIMPLE_ACCOUNT_FACTORY_ADDRESS
     const factoryData = encodeFunctionData({
@@ -109,9 +110,9 @@ async function factoryDataTest() {
     });
     console.log("Calculated sender address:", senderAddress);
 
-    const to = "0x5728C7b8b448332Acda43369afa3a2c25C947D43"
+    const to = "0x5728C7b8b448332Acda43369afa3a2c25C947D43";
     const value = 0;
-    const data = "0x68656c6c"
+    const data = "0x68656c6c";
 
     const callData = encodeFunctionData({
         abi: [
@@ -128,9 +129,66 @@ async function factoryDataTest() {
             },
         ],
         args: [to, value, data],
-    })
+    });
 
     console.log("Generated callData:", callData);
+    
+    //CREATE USER OPERATIONS 
+    const gasPrice = await bundlerClient.getUserOperationGasPrice();
+
+    const userOperation = {
+        sender: senderAddress,
+        nonce: 0n,
+        factory: factory as Address,
+        factoryData,
+        callData,
+        maxFeePerGas: gasPrice.fast.maxFeePerGas,
+        maxPriorityFeePerGas: gasPrice.fast.maxPriorityFeePerGas,
+        // dummy signature, needs to be there so the SimpleAccount doesn't immediately revert because of invalid signature length
+        signature:
+            "0xa15569dd8f8324dbeabf8073fdec36d4b754f53ce5901e283c6de79af177dc94557fa3c9922cd7af2a96ca94402d35c39f266925ee6407aeb32b31d76978d4ba1c" as Hex,
+    }; 
+    
+    //GET SPONSORSHIP FROM PAYMASTER
+    console.log("getting sponsorship...");
+    const sponsorUserOperationResult = await paymasterClient.sponsorUserOperation({
+        userOperation,
+    })
+
+    console.log("getting sponsorship...");
+    const sponsoredUserOperation: UserOperation<"v0.7"> = {
+        ...userOperation,
+        ...sponsorUserOperationResult,
+    };
+
+    console.log("Received paymaster sponsor result:", sponsorUserOperationResult); 
+    
+    //generate signature
+    const signature = await signUserOperationHashWithECDSA({
+        account: owner,
+        userOperation: sponsoredUserOperation,
+        chainId: sepolia.id,
+        entryPoint: ENTRYPOINT_ADDRESS_V07,
+    });
+    sponsoredUserOperation.signature = signature;
+
+    console.log("Generated signature:", signature); 
+    
+    //submit the user op to be bundled...
+    const userOperationHash = await bundlerClient.sendUserOperation({
+        userOperation: sponsoredUserOperation,
+    })
+
+    console.log("Received User Operation hash:", userOperationHash)
+
+    // let's also wait for the userOperation to be included, by continually querying for the receipts
+    console.log("Querying for receipts...")
+    const receipt = await bundlerClient.waitForUserOperationReceipt({
+        hash: userOperationHash,
+    })
+    const txHash = receipt.receipt.transactionHash
+
+    console.log(`UserOperation included: https://sepolia.etherscan.io/tx/${txHash}`);
 }
 
-gaslessTransactionsTest();
+sendUserOperationsTest();
