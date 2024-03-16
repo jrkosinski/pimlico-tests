@@ -1,0 +1,20 @@
+{
+  "name": "pimlico-tests",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "tsx index.ts"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "permissionless": "^0.1.4",
+    "viem": "^2.0.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.10",
+    "tsx": "^3.13.0"
+  }
+}
