@@ -1,5 +1,5 @@
 import "dotenv/config"
-import { getAccountNonce, createSmartAccountClient, ENTRYPOINT_ADDRESS_V07, ENTRYPOINT_ADDRESS_V06, bundlerActions, getSenderAddress, signUserOperationHashWithECDSA } from "permissionless"
+import { getAccountNonce, createSmartAccountClient, ENTRYPOINT_ADDRESS_V07, ENTRYPOINT_ADDRESS_V06, bundlerActions, getSenderAddress, signUserOperationHashWithECDSA, UserOperation } from "permissionless"
 import { Address, concat, createClient, createPublicClient, encodeFunctionData, Hash, http } from "viem"
 //import { generatePrivateKey, privateKeyToAccount, signMessage } from "viem/accounts"
 import { sepolia, polygonMumbai } from "viem/chains"
@@ -301,10 +301,9 @@ async function sendUserOperationsWithErc20PaymasterTest()
     
     // https://docs.pimlico.io/paymaster/erc20-paymaster/contract-addresses
     const erc20PaymasterAddress = "0x0000000000325602a77416A16136FDafd04b299f"
-    const usdcTokenAddress = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" // USDC on sepolia
+    //const usdcTokenAddress = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" // USDC on sepolia
+    const usdcTokenAddress = "0x46E34764D5288c6047aeC37E163F8C782a0b3C75"; //my own token
 
-    const approveCallData = generateApproveCallData(usdcTokenAddress, erc20PaymasterAddress);
-    console.log("approveCallData: " + approveCallData);
     
     const senderUsdcBalance = await publicClient.readContract({
         abi: [
@@ -321,7 +320,122 @@ async function sendUserOperationsWithErc20PaymasterTest()
         args: [senderAddress],
     }); 
     
+    console.log("sender address:", senderAddress);
     console.log("senderUsdcBalance:", senderUsdcBalance);
+    
+    if (senderUsdcBalance < 1_000_000n) {
+        throw new Error(
+            `insufficient USDC balance for counterfactual wallet address ${senderAddress}: ${Number(senderUsdcBalance) / 1000000
+            } USDC, required at least 1 USDC`,
+        )
+    }
+
+    const approveCallData = generateApproveCallData(usdcTokenAddress, erc20PaymasterAddress);
+    console.log("approveCallData: " + approveCallData);
+
+    // FILL OUT THE REMAINING USEROPERATION VALUES
+    const gasPriceResult = await bundlerClient.getUserOperationGasPrice(); 
+    
+    const userOperation: Partial<UserOperation<"v0.6">> = {
+        sender: senderAddress,
+        nonce: 0n,
+        initCode,
+        callData: approveCallData,
+        maxFeePerGas: gasPriceResult.fast.maxFeePerGas,
+        maxPriorityFeePerGas: gasPriceResult.fast.maxPriorityFeePerGas,
+        paymasterAndData: "0x",
+        signature:
+            "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c",
+    }
+
+    const nonce = await getAccountNonce(publicClient, {
+        entryPoint: entryPointAddr,
+        sender: senderAddress,
+    })
+
+    if (nonce === 0n) {
+        // SPONSOR THE USEROPERATION USING THE VERIFYING PAYMASTER
+        const result = await paymasterClient.sponsorUserOperation({
+            userOperation: userOperation as UserOperation<"v0.6">,
+        })
+
+        userOperation.preVerificationGas = result.preVerificationGas
+        userOperation.verificationGasLimit = result.verificationGasLimit
+        userOperation.callGasLimit = result.callGasLimit
+        userOperation.paymasterAndData = result.paymasterAndData
+
+        // SIGN THE USER OPERATION
+        const signature = await signUserOperationHashWithECDSA({
+            account: signer,
+            userOperation: userOperation as UserOperation<"v0.6">,
+            chainId: sepolia.id,
+            entryPoint: entryPointAddr,
+        })
+
+        userOperation.signature = signature
+        await submitUserOperation(userOperation as UserOperation<"v0.6">)
+    } else {
+        console.log("Deployment UserOperation previously submitted, skipping...")
+    }
+    
+    //SUBMIT THE ACTUAL OPERATION... 
+    const genereteDummyCallData = () => {
+        const to = "0x5728C7b8b448332Acda43369afa3a2c25C947D43"; //recipient
+        const value = 0n
+        const data = "0x"
+
+        const callData = encodeFunctionData({
+            abi: [
+                {
+                    inputs: [
+                        { name: "dest", type: "address" },
+                        { name: "value", type: "uint256" },
+                        { name: "func", type: "bytes" },
+                    ],
+                    name: "execute",
+                    outputs: [],
+                    stateMutability: "nonpayable",
+                    type: "function",
+                },
+            ],
+            args: [to, value, data],
+        })
+
+        return callData
+    }
+
+    console.log("Sponsoring a user operation with the ERC-20 paymaster...")
+
+    const newNonce = await getAccountNonce(publicClient, {
+        entryPoint: entryPointAddr,
+        sender: senderAddress,
+    })
+
+    const sponsoredUserOperation: UserOperation<"v0.6"> = {
+        sender: senderAddress,
+        nonce: newNonce,
+        initCode: "0x",
+        callData: genereteDummyCallData(),
+        callGasLimit: 100_000n, // hardcode it for now at a high value
+        verificationGasLimit: 500_000n, // hardcode it for now at a high value
+        preVerificationGas: 50_000n, // hardcode it for now at a high value
+        maxFeePerGas: gasPriceResult.fast.maxFeePerGas,
+        maxPriorityFeePerGas: gasPriceResult.fast.maxPriorityFeePerGas,
+        paymasterAndData: erc20PaymasterAddress, // to use the erc20 paymaster, put its address in the paymasterAndData field
+        signature: "0x",
+    }
+
+    // SIGN THE USEROPERATION
+    return;
+    //TODO: this part down here fails with errors indicating paymaster can't handle gas fees
+    sponsoredUserOperation.signature = await signUserOperationHashWithECDSA({
+        account: signer,
+        userOperation: sponsoredUserOperation,
+        chainId: polygonMumbai.id,
+        entryPoint: entryPointAddr,
+    });
+
+    await submitUserOperation(sponsoredUserOperation); 
 }
 
 sendUserOperationsWithErc20PaymasterTest();
