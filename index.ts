@@ -47,6 +47,7 @@ export async function createSafeSmartAccount() {
         paymasterAddress: safeConstAddresses.sepolia.ERC20_PAYMASTER_ADDRESS
     }); 
     
+    //get address of ? 
     const sender = await getAccountAddress({
         client: publicClient,
         owner: signer.address,
@@ -69,12 +70,14 @@ export async function createSafeSmartAccount() {
         sender
     }); 
     
+    console.log("sender: ", sender);
+    
     //encode data to call function , for user operation
     const callData: `0x${string}` = encodeCallData({
         to: sender,
         data: '0x',
         value: 0n
-    })
+    });
     
     //create user operation
     const sponsoredUserOperation: UserOperation = {
@@ -84,12 +87,24 @@ export async function createSafeSmartAccount() {
         callData,
         callGasLimit: 1n, // All gas values will be filled by Estimation Response Data.
         verificationGasLimit: 10000n,
-        preVerificationGas: 1n,
+        preVerificationGas: 10000n,
         maxFeePerGas: 1n,
         maxPriorityFeePerGas: 1n,
         paymasterAndData: safeConstAddresses.sepolia.ERC20_PAYMASTER_ADDRESS,
         signature: '0x'
     }
+
+    //estimate gas 
+    const gasEstimate = await bundlerClient.estimateUserOperationGas({
+        userOperation: sponsoredUserOperation,
+        entryPoint: ENTRYPOINT_ADDRESS_V06
+    })
+    const maxGasPriceResult = await bundlerClient.getUserOperationGasPrice()
+    sponsoredUserOperation.callGasLimit = gasEstimate.callGasLimit
+    sponsoredUserOperation.verificationGasLimit = gasEstimate.verificationGasLimit
+    sponsoredUserOperation.preVerificationGas = gasEstimate.preVerificationGas
+    sponsoredUserOperation.maxFeePerGas = maxGasPriceResult.fast.maxFeePerGas
+    sponsoredUserOperation.maxPriorityFeePerGas = maxGasPriceResult.fast.maxPriorityFeePerGas
     
     //sign the operation 
     sponsoredUserOperation.signature = await signUserOperation(
@@ -100,10 +115,10 @@ export async function createSafeSmartAccount() {
     ); 
     
     //submit the operation 
-    const userOperationHash = await bundlerClient.sendUserOperation({
-        userOperation: sponsoredUserOperation,
-        entryPoint: ENTRYPOINT_ADDRESS_V06
-    });
+    //const userOperationHash = await bundlerClient.sendUserOperation({
+    //    userOperation: sponsoredUserOperation,
+    //    entryPoint: ENTRYPOINT_ADDRESS_V06
+    //});
 }
 
 createSafeSmartAccount();
