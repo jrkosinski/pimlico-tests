@@ -146,7 +146,6 @@ export const signUserOperation = async (
 }
 
 export const generateApproveCallData = (erc20TokenAddress: Address, paymasterAddress: Address) => {
-    console.log(paymasterAddress);
     const approveData = encodeFunctionData({
         abi: [
             {
@@ -321,8 +320,8 @@ export const getAccountInitCode = async ({
 }): Promise<Hex> => {
     if (!owner) throw new Error('Owner account not found')
 
-    console.log(erc20TokenAddress);
-    console.log(paymasterAddress);
+    console.log("erc20 ", erc20TokenAddress);
+    console.log("paymaster ", paymasterAddress);
 
     const initializer = await getInitializerCode({
         owner,

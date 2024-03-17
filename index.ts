@@ -1,5 +1,5 @@
 import "dotenv/config"
-import { getAccountNonce, ENTRYPOINT_ADDRESS_V06, bundlerActions, UserOperation } from "permissionless"
+import { getAccountNonce, ENTRYPOINT_ADDRESS_V06, bundlerActions, UserOperation, ENTRYPOINT_ADDRESS_V07 } from "permissionless"
 import { Client, createClient,http, } from "viem"
 import { sepolia } from "viem/chains"
 import { 
@@ -17,6 +17,8 @@ import {
     apiKey
  } from "./lib";
 
+const SPONSORSHIP_POLICY_ID = "sp_green_iron_lad";
+const USE_PAYMASTER = true;
 
 export async function createSafeSmartAccount() {
     const bundlerUrl = `https://api.pimlico.io/v1/sepolia/rpc?apikey=${apiKey}`;
@@ -62,15 +64,16 @@ export async function createSafeSmartAccount() {
     })
     
     //bytecode of contract (counterfactual)
-    const contractCode = await publicClient.getBytecode({ address: sender })
+    const contractCode = null; //await publicClient.getBytecode({ address: sender })
 
     //generate a nonce from account
     const nonce = await getAccountNonce(publicClient as Client, {
         entryPoint: ENTRYPOINT_ADDRESS_V06,
-        sender
+        sender: sender
     }); 
     
     console.log("sender: ", sender);
+    console.log("nonce: ", nonce);
     
     //encode data to call function , for user operation
     const callData: `0x${string}` = encodeCallData({
@@ -95,16 +98,30 @@ export async function createSafeSmartAccount() {
     }
 
     //estimate gas 
-    const gasEstimate = await bundlerClient.estimateUserOperationGas({
-        userOperation: sponsoredUserOperation,
-        entryPoint: ENTRYPOINT_ADDRESS_V06
-    })
-    const maxGasPriceResult = await bundlerClient.getUserOperationGasPrice()
-    sponsoredUserOperation.callGasLimit = gasEstimate.callGasLimit
-    sponsoredUserOperation.verificationGasLimit = gasEstimate.verificationGasLimit
-    sponsoredUserOperation.preVerificationGas = gasEstimate.preVerificationGas
-    sponsoredUserOperation.maxFeePerGas = maxGasPriceResult.fast.maxFeePerGas
-    sponsoredUserOperation.maxPriorityFeePerGas = maxGasPriceResult.fast.maxPriorityFeePerGas
+    if (USE_PAYMASTER) {
+        const sponsorResult = await paymasterClient.sponsorUserOperation({
+            userOperation: sponsoredUserOperation,
+            entryPoint: ENTRYPOINT_ADDRESS_V06,
+            sponsorshipPolicyId: SPONSORSHIP_POLICY_ID
+        })
+
+        sponsoredUserOperation.callGasLimit = sponsorResult.callGasLimit
+        sponsoredUserOperation.verificationGasLimit = sponsorResult.verificationGasLimit
+        sponsoredUserOperation.preVerificationGas = sponsorResult.preVerificationGas
+        sponsoredUserOperation.paymasterAndData = sponsorResult.paymasterAndData
+    }
+    else {
+        const gasEstimate = await bundlerClient.estimateUserOperationGas({
+            userOperation: sponsoredUserOperation,
+            entryPoint: ENTRYPOINT_ADDRESS_V06
+        })
+        const maxGasPriceResult = await bundlerClient.getUserOperationGasPrice()
+        sponsoredUserOperation.callGasLimit = gasEstimate.callGasLimit
+        sponsoredUserOperation.verificationGasLimit = gasEstimate.verificationGasLimit
+        sponsoredUserOperation.preVerificationGas = gasEstimate.preVerificationGas
+        sponsoredUserOperation.maxFeePerGas = maxGasPriceResult.fast.maxFeePerGas
+        sponsoredUserOperation.maxPriorityFeePerGas = maxGasPriceResult.fast.maxPriorityFeePerGas
+    }
     
     //sign the operation 
     sponsoredUserOperation.signature = await signUserOperation(
@@ -115,10 +132,10 @@ export async function createSafeSmartAccount() {
     ); 
     
     //submit the operation 
-    //const userOperationHash = await bundlerClient.sendUserOperation({
-    //    userOperation: sponsoredUserOperation,
-    //    entryPoint: ENTRYPOINT_ADDRESS_V06
-    //});
+    const userOperationHash = await bundlerClient.sendUserOperation({
+        userOperation: sponsoredUserOperation,
+        entryPoint: ENTRYPOINT_ADDRESS_V06
+    });
 }
 
 createSafeSmartAccount();
