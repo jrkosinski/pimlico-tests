@@ -64,7 +64,7 @@ export async function createSafeSmartAccount() {
     })
     
     //bytecode of contract (counterfactual)
-    const contractCode = null; //await publicClient.getBytecode({ address: sender })
+    const contractCode = await publicClient.getBytecode({ address: sender })
 
     //generate a nonce from account
     const nonce = await getAccountNonce(publicClient as Client, {
