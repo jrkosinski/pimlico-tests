@@ -26,7 +26,7 @@ export async function createSafeSmartAccount() {
 
     //create bundler client 
     const bundlerClient = createClient({
-        transport: http(transportUrl),
+        transport: http(bundleUrl),
         chain: sepolia,
     }).extend(bundlerActions(ENTRYPOINT_ADDRESS_V06)
     ).extend(pimlicoBundlerActions(ENTRYPOINT_ADDRESS_V06)); 
